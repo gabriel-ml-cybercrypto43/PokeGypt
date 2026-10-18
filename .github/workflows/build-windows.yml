@@ -16,14 +16,15 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      # Ferramenta/scripts do vcpkg fixados na tag 2026.07.29 (links msys2 atuais; os da 2025.01.13 dao 404).
-      # As VERSOES dos pacotes vem do builtin-baseline em vcpkg.json (Boost 1.86.0).
+      # Scripts do vcpkg fixados no commit 2200159 (2026-10-02, "Refresh MSYS2 packages"):
+      # links msys2 validos e contem o port gmp 6.3.0#5 (autoconf corrigido).
+      # As VERSOES dos pacotes vem do builtin-baseline + overrides em vcpkg.json (Boost 1.86.0).
       # fetch-depth 0: o vcpkg le o commit do baseline no historico git.
-      - name: Checkout vcpkg (2026.07.29)
+      - name: Checkout vcpkg (2026-10-02)
         uses: actions/checkout@v4
         with:
           repository: microsoft/vcpkg
-          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
+          ref: 2200159cd465157f20133e363e4604ac4d68181b
           path: vcpkg
           fetch-depth: 0
 
@@ -56,6 +57,22 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows
           if ($LASTEXITCODE -ne 0) { throw "CMake configure / vcpkg install falhou" }
+
+      # So roda se algo falhar: mostra o erro real de cada pacote do vcpkg no fim do log.
+      - name: Show vcpkg failure logs
+        if: failure()
+        shell: pwsh
+        run: |
+          $log = "build\vcpkg-manifest-install.log"
+          if (Test-Path $log) {
+            Write-Host "===== $log (linhas com erro) ====="
+            Select-String -Path $log -Pattern "error|failed" | Select-Object -Last 40 | ForEach-Object { $_.Line }
+          }
+          Get-ChildItem vcpkg\buildtrees -Recurse -Include "*-err.log","config.log" -ErrorAction SilentlyContinue |
+            Where-Object { $_.Length -gt 0 } | ForEach-Object {
+              Write-Host "===== $($_.FullName) ====="
+              Get-Content $_.FullName -Tail 60
+            }
 
       - name: Verify Boost 1.86 legacy Asio API
         shell: pwsh

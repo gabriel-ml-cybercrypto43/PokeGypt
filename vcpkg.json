@@ -1,7 +1,7 @@
 {
   "name": "pokegypt",
   "version-string": "1.2",
-  "description": "PokeGypt (TFS 1.2). Baseline vcpkg 2025.01.13 = Boost 1.86.0, ultima versao com io_service/deadline_timer (removidos no 1.87).",
+  "description": "PokeGypt (TFS 1.2). Baseline vcpkg 2025.01.13 = Boost 1.86.0, ultima versao com io_service/deadline_timer (removidos no 1.87). gmp vem de versao mais nova: o port antigo baixa pacotes msys2 que nao existem mais.",
   "builtin-baseline": "6f29f12e82a8293156836ad81cc9bf5af41fe836",
   "dependencies": [
     "boost-asio",
@@ -14,5 +14,10 @@
     "luajit",
     "pugixml",
     "sqlite3"
+  ],
+  "overrides": [
+    { "name": "gmp", "version": "6.3.0", "port-version": 5 },
+    { "name": "vcpkg-make", "version": "2026-07-09", "port-version": 1 },
+    { "name": "vcpkg-cmake-get-vars", "version": "2025-05-29" }
   ]
 }
