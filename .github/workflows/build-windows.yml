@@ -1,0 +1,111 @@
+name: Build PokeGypt Windows x64
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build on Windows 2022 (MSVC x64)
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up vcpkg Caching
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ env.VCPKG_INSTALLATION_ROOT }}/installed
+            ${{ env.VCPKG_INSTALLATION_ROOT }}/downloads
+          key: vcpkg-${{ runner.os }}-x64-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-x64-
+
+      - name: Install vcpkg Dependencies
+        shell: pwsh
+        run: |
+          $basePkgs = @(
+            "luajit",
+            "boost-system",
+            "boost-asio",
+            "boost-lexical-cast",
+            "boost-range",
+            "boost-lockfree",
+            "pugixml",
+            "sqlite3"
+          )
+
+          Write-Host ">> Testando instalacao do pacote gmp via vcpkg..."
+          vcpkg install ($basePkgs + "gmp") --triplet x64-windows
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning ">> vcpkg com gmp falhou. Utilizando fallback para mpir..."
+            vcpkg install ($basePkgs + "mpir") --triplet x64-windows
+          }
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -B build -S . `
+            -G "Visual Studio 17 2022" `
+            -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DVCPKG_TARGET_TRIPLET=x64-windows
+
+      - name: Build PokeGypt (Release x64)
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel
+
+      - name: Package Executable and DLLs
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package
+
+          # Copia o executavel tfs.exe
+          $exePath = Get-ChildItem -Path build -Recurse -Filter "tfs.exe" | Select-Object -First 1 -ExpandProperty FullName
+          if ($exePath) {
+            Write-Host "Encontrado executavel em: $exePath"
+            Copy-Item -Path $exePath -Destination "package\tfs.exe"
+          } else {
+            throw "Erro: tfs.exe nao encontrado no diretorio de build!"
+          }
+
+          # Copia as DLLs de runtime geradas pelo vcpkg
+          $vcpkgBin = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin"
+          if (Test-Path $vcpkgBin) {
+            Write-Host "Copiando DLLs de: $vcpkgBin"
+            Get-ChildItem -Path $vcpkgBin -Filter "*.dll" | Copy-Item -Destination "package\"
+          }
+
+          $buildVcpkgBin = "build\vcpkg_installed\x64-windows\bin"
+          if (Test-Path $buildVcpkgBin) {
+            Write-Host "Copiando DLLs adicionais de: $buildVcpkgBin"
+            Get-ChildItem -Path $buildVcpkgBin -Filter "*.dll" | Copy-Item -Destination "package\"
+          }
+
+          # Cria o arquivo de instrucoes
+          @"
+          ==================================================
+          PokeGypt Server - Executavel Windows x64
+          Compativel com Intel Core i3-530 (Base x64 / SSE2)
+          ==================================================
+          Instrucoes de instalacao:
+          1. Copie o arquivo 'tfs.exe' e todas as DLLs (.dll) desta pasta.
+          2. Cole diretamente na raiz do servidor PokeGypt (ao lado de 'config.lua' e da pasta 'data/').
+          3. Abra o 'tfs.exe'.
+          4. O banco de dados SQLite ('pokegypt.sqlite') sera inicializado automaticamente no primeiro boot.
+          ==================================================
+          "@ | Out-File -FilePath "package\LEIA-ME.txt" -Encoding utf8
+
+      - name: Upload Windows x64 Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PokeGypt-Windows-x64
+          path: package/*
+          if-no-files-found: error

@@ -3,6 +3,12 @@ if(__FIND_CXX11_CMAKE__)
 endif()
 set(__FIND_CXX11_CMAKE__ TRUE)
 
+if(MSVC)
+    set(CMAKE_CXX_STANDARD 11)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    return()
+endif()
+
 include(CheckCXXCompilerFlag)
 enable_language(CXX)
 
