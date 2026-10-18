@@ -16,46 +16,56 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Set up vcpkg Caching
+      # vcpkg fixado na tag 2025.01.13 (mesmo commit do builtin-baseline em vcpkg.json):
+      # Boost 1.86.0 e o ultimo com io_service/deadline_timer, usados pelo TFS 1.2.
+      - name: Checkout vcpkg (2025.01.13)
+        uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: 6f29f12e82a8293156836ad81cc9bf5af41fe836
+          path: vcpkg
+          fetch-depth: 0
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+
+      # Cache binario do vcpkg: cada pacote e indexado pelo hash ABI (versao + triplet + compilador),
+      # entao um cache antigo nunca mistura versoes diferentes; no pior caso, so recompila.
+      - name: Set up vcpkg binary cache
         uses: actions/cache@v4
         with:
-          path: |
-            ${{ env.VCPKG_INSTALLATION_ROOT }}/installed
-            ${{ env.VCPKG_INSTALLATION_ROOT }}/downloads
-          key: vcpkg-${{ runner.os }}-x64-${{ hashFiles('CMakeLists.txt', 'cmake/*.cmake') }}
+          path: ${{ github.workspace }}/vcpkg-bincache
+          key: vcpkg-bin-${{ runner.os }}-x64-${{ hashFiles('vcpkg.json') }}
           restore-keys: |
-            vcpkg-${{ runner.os }}-x64-
+            vcpkg-bin-${{ runner.os }}-x64-
 
-      - name: Install vcpkg Dependencies
-        shell: pwsh
-        run: |
-          $basePkgs = @(
-            "luajit",
-            "boost-system",
-            "boost-asio",
-            "boost-lexical-cast",
-            "boost-range",
-            "boost-lockfree",
-            "pugixml",
-            "sqlite3"
-          )
-
-          Write-Host ">> Testando instalacao do pacote gmp via vcpkg..."
-          vcpkg install ($basePkgs + "gmp") --triplet x64-windows
-          if ($LASTEXITCODE -ne 0) {
-            Write-Warning ">> vcpkg com gmp falhou. Utilizando fallback para mpir..."
-            vcpkg install ($basePkgs + "mpir") --triplet x64-windows
-          }
-
+      # Dependencias vem do vcpkg.json (modo manifest) e sao instaladas durante o configure;
+      # qualquer falha de instalacao derruba este passo.
       - name: Configure CMake
         shell: pwsh
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/vcpkg-bincache
         run: |
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
           cmake -B build -S . `
             -G "Visual Studio 17 2022" `
             -A x64 `
             -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `
+            -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" `
             -DVCPKG_TARGET_TRIPLET=x64-windows
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure / vcpkg install falhou" }
+
+      - name: Verify Boost 1.86 legacy Asio API
+        shell: pwsh
+        run: |
+          $inc = "build\vcpkg_installed\x64-windows\include\boost"
+          $num = (Select-String -Path "$inc\version.hpp" -Pattern '#define BOOST_VERSION (\d+)').Matches[0].Groups[1].Value
+          Write-Host "BOOST_VERSION = $num"
+          if ($num -ne "108600") { throw "Esperado Boost 1.86.0 (108600), encontrado $num" }
+          foreach ($h in "asio\io_service.hpp", "asio\deadline_timer.hpp", "date_time\posix_time\posix_time_types.hpp") {
+            if (-not (Test-Path "$inc\$h")) { throw "Header ausente: boost\$h" }
+          }
 
       - name: Build PokeGypt (Release x64)
         shell: pwsh
@@ -76,18 +86,11 @@ jobs:
             throw "Erro: tfs.exe nao encontrado no diretorio de build!"
           }
 
-          # Copia as DLLs de runtime geradas pelo vcpkg
-          $vcpkgBin = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows\bin"
-          if (Test-Path $vcpkgBin) {
-            Write-Host "Copiando DLLs de: $vcpkgBin"
-            Get-ChildItem -Path $vcpkgBin -Filter "*.dll" | Copy-Item -Destination "package\"
-          }
-
+          # Copia as DLLs de runtime instaladas pelo vcpkg (modo manifest)
           $buildVcpkgBin = "build\vcpkg_installed\x64-windows\bin"
-          if (Test-Path $buildVcpkgBin) {
-            Write-Host "Copiando DLLs adicionais de: $buildVcpkgBin"
-            Get-ChildItem -Path $buildVcpkgBin -Filter "*.dll" | Copy-Item -Destination "package\"
-          }
+          if (-not (Test-Path $buildVcpkgBin)) { throw "Erro: $buildVcpkgBin nao encontrado!" }
+          Write-Host "Copiando DLLs de: $buildVcpkgBin"
+          Get-ChildItem -Path $buildVcpkgBin -Filter "*.dll" | Copy-Item -Destination "package\"
 
           # Cria o arquivo de instrucoes
           @"
