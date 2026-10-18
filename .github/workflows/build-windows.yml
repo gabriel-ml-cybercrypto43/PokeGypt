@@ -16,13 +16,14 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      # vcpkg fixado na tag 2025.01.13 (mesmo commit do builtin-baseline em vcpkg.json):
-      # Boost 1.86.0 e o ultimo com io_service/deadline_timer, usados pelo TFS 1.2.
-      - name: Checkout vcpkg (2025.01.13)
+      # Ferramenta/scripts do vcpkg fixados na tag 2026.07.29 (links msys2 atuais; os da 2025.01.13 dao 404).
+      # As VERSOES dos pacotes vem do builtin-baseline em vcpkg.json (Boost 1.86.0).
+      # fetch-depth 0: o vcpkg le o commit do baseline no historico git.
+      - name: Checkout vcpkg (2026.07.29)
         uses: actions/checkout@v4
         with:
           repository: microsoft/vcpkg
-          ref: 6f29f12e82a8293156836ad81cc9bf5af41fe836
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d
           path: vcpkg
           fetch-depth: 0
 
